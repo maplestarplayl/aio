@@ -235,7 +235,7 @@ where
                 WriteState::Pending(token) => {
                     this.state = WriteState::Done;
                     let mut poller = local_proactor.get_poller();
-                    
+
                     let res = poller.get_result(token).unwrap();
                     Poll::Ready(Ok(res))
                 }

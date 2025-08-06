@@ -3,18 +3,19 @@ name = "uring-rt"
 version = "0.1.0"
 edition = "2024"
 
-[profile.dev]
-debug = false
+
 
 
 
 [dependencies]
+aio-macros = {path = "../aio-macros"}
 futures = "0.3.31"
 io-uring = "0.7.9"
 libc = "0.2.174"
 nix = { version = "0.30.1", features = ["event"] }
-num_cpus = "1.17.0"
+# num_cpus = "1.17.0"
 
 
 [dev-dependencies]
+# aio-macros = {path = "../aio-macros"}
 criterion = { version = "0.7", features = ["html_reports"] }

@@ -6,8 +6,8 @@ pub use net::{AsyncTcpListener, AsyncTcpStream};
 mod poller;
 
 mod proactor;
+pub use aio_macros::{main, test};
 pub use proactor::Proactor;
-
 pub fn spawn<F>(future: F)
 where
     F: Future<Output = ()> + 'static,

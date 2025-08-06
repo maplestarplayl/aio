@@ -1,0 +1,8 @@
+[package]
+name = "aio"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+aio-macros = { path = "../aio-macros" }
+uring-rt = { path = "../uring-rt" }

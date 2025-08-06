@@ -62,7 +62,6 @@ impl Poller {
     }
 
     pub fn poll(&mut self) -> io::Result<Vec<Waker>> {
-
         self.ring.submit_and_wait(1)?;
 
         let mut cqueue = self.ring.completion();

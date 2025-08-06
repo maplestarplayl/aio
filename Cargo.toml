@@ -1,3 +1,8 @@
 
 [workspace]
-members = ["macros","uring-rt"]
+members = ["aio-macros","aio","uring-rt"]
+
+resolver = "2"
+
+[profile.dev]
+debug = false
