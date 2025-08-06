@@ -10,12 +10,13 @@ use std::task::Waker;
 use io_uring::squeue::Entry;
 use io_uring::{IoUring, opcode, types};
 use nix::sys::eventfd::{EfdFlags, EventFd};
+use slab::Slab;
 
 const WAKE_TOKEN: u64 = u64::MAX;
 
 pub struct Poller {
     ring: IoUring,
-    wakers: HashMap<u64, Waker>,
+    wakers: Slab<Waker>,
     results: HashMap<u64, usize>, // store the result of ops, mostly are length
     addrs: HashMap<u64, (Box<libc::sockaddr_storage>, Box<libc::socklen_t>)>,
     wakeup_fd: EventFd,
@@ -43,7 +44,7 @@ impl Poller {
         }
         Ok(Self {
             ring,
-            wakers: HashMap::new(),
+            wakers: Slab::with_capacity(entries as usize),
             results: HashMap::new(),
             addrs: HashMap::new(),
             wakeup_fd,
@@ -85,7 +86,8 @@ impl Poller {
                 continue;
             }
 
-            if let Some(waker) = self.wakers.remove(&user_data) {
+            if let Some(waker) = self.wakers.try_remove(user_data as _) {
+                //TODO: Maybe add err handling logic for cases that result < 0
                 ready_wakers.push(waker);
                 self.results.insert(user_data, result as _);
             }
@@ -93,10 +95,11 @@ impl Poller {
 
         Ok(ready_wakers)
     }
-    pub fn submit_read_entry<F>(&mut self, fd: F, buf: &mut [u8], user_data: u64, waker: Waker)
+    pub fn submit_read_entry<F>(&mut self, fd: F, buf: &mut [u8], waker: Waker) -> u64
     where
         F: IntoRawFd,
     {
+        let user_data = self.wakers.insert(waker) as _;
         let read_e = opcode::Read::new(
             types::Fd(fd.into_raw_fd()),
             buf.as_mut_ptr(),
@@ -105,26 +108,32 @@ impl Poller {
         .build()
         .user_data(user_data);
 
-        self.wakers.insert(user_data, waker);
+        // self.wakers.insert(user_data, waker);
 
         unsafe {
             self.push_entry(read_e);
         }
+
+        user_data
     }
 
-    pub fn submit_write_entry<F>(&mut self, fd: F, buf: &[u8], user_data: u64, waker: Waker)
+    pub fn submit_write_entry<F>(&mut self, fd: F, buf: &[u8], waker: Waker) -> u64
     where
         F: IntoRawFd,
     {
+        let user_data = self.wakers.insert(waker) as _;
+
         let write_e = opcode::Write::new(types::Fd(fd.into_raw_fd()), buf.as_ptr(), buf.len() as _)
             .build()
             .user_data(user_data);
 
-        self.wakers.insert(user_data, waker);
+        // self.wakers.insert(user_data, waker);
 
         unsafe {
             self.push_entry(write_e);
         }
+        
+        user_data
     }
 
     pub fn submit_send_to_entry<F>(
@@ -132,11 +141,12 @@ impl Poller {
         fd: F,
         buf: &[u8],
         addr: SocketAddr,
-        user_data: u64,
         waker: Waker,
-    ) where
+    ) -> u64 
+    where
         F: IntoRawFd,
     {
+        let user_data = self.wakers.insert(waker) as _;
         let (addr_storage, addr_len) = socket_addr_to_storage(addr);
         let iov = [libc::iovec {
             iov_base: buf.as_ptr() as *mut _,
@@ -156,17 +166,20 @@ impl Poller {
             .build()
             .user_data(user_data);
 
-        self.wakers.insert(user_data, waker);
+        // self.wakers.insert(user_data, waker);
 
         unsafe {
             self.push_entry(send_e);
         }
+
+        user_data
     }
 
-    pub fn submit_recv_from_entry<F>(&mut self, fd: F, buf: &mut [u8], user_data: u64, waker: Waker)
+    pub fn submit_recv_from_entry<F>(&mut self, fd: F, buf: &mut [u8], waker: Waker) -> u64
     where
         F: IntoRawFd,
     {
+        let user_data = self.wakers.insert(waker) as _;
         let mut storage = Box::new(unsafe { std::mem::zeroed() });
         let addrlen = Box::new(std::mem::size_of::<libc::sockaddr_storage>() as _);
         let iov = [libc::iovec {
@@ -187,12 +200,14 @@ impl Poller {
             .build()
             .user_data(user_data);
 
-        self.wakers.insert(user_data, waker);
+        // self.wakers.insert(user_data, waker);
         self.addrs.insert(user_data, (storage, addrlen));
 
         unsafe {
             self.push_entry(recv_e);
         }
+
+        user_data
     }
 
     pub fn submit_accept_entry(
@@ -200,19 +215,21 @@ impl Poller {
         fd: RawFd,
         storage: &mut libc::sockaddr_storage,
         addrlen: &mut libc::socklen_t,
-        user_data: u64,
         waker: Waker,
-    ) {
+    ) -> u64 {
+        let user_data = self.wakers.insert(waker) as _;
         *addrlen = std::mem::size_of::<libc::sockaddr_storage>() as libc::socklen_t;
         let accept_e = opcode::Accept::new(types::Fd(fd), storage as *mut _ as *mut _, addrlen)
             .build()
             .user_data(user_data);
 
-        self.wakers.insert(user_data, waker);
+        // self.wakers.insert(user_data, waker);
 
         unsafe {
             self.push_entry(accept_e);
         }
+
+        user_data
     }
 
     pub fn unique_token(&self) -> u64 {

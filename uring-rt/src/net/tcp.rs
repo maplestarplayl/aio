@@ -95,14 +95,12 @@ impl<'a> Future for AcceptFuture<'a> {
         Proactor::with(|local_proactor| match this.state {
             FutureState::Unsubmitted => {
                 let mut poller = local_proactor.get_poller();
-                let user_data = poller.unique_token();
                 let mut addr_len = std::mem::size_of::<sockaddr_storage>() as socklen_t;
 
-                poller.submit_accept_entry(
+                let user_data = poller.submit_accept_entry(
                     this.listener.as_raw_fd(),
                     &mut this.storage,
                     &mut addr_len,
-                    user_data,
                     cx.waker().clone(),
                 );
 

@@ -185,13 +185,11 @@ where
             match this.state {
                 FutureState::Unsubmitted => {
                     let mut poller = local_proactor.get_poller();
-                    let token = poller.unique_token();
 
                     // Submit the read operation
-                    poller.submit_read_entry(
+                    let token = poller.submit_read_entry(
                         this.fd.as_raw_fd(),
                         this.buf,
-                        token,
                         cx.waker().clone(),
                     );
 
@@ -234,13 +232,11 @@ where
             match this.state {
                 FutureState::Unsubmitted => {
                     let mut poller = local_proactor.get_poller();
-                    let token = poller.unique_token();
 
                     // Submit the write operation (assuming a similar method exists in Poller)
-                    poller.submit_write_entry(
+                    let token = poller.submit_write_entry(
                         this.fd.as_raw_fd(),
                         this.buf,
-                        token,
                         cx.waker().clone(),
                     );
 
@@ -280,13 +276,11 @@ where
             match this.state {
                 FutureState::Unsubmitted => {
                     let mut poller = local_proactor.get_poller();
-                    let token = poller.unique_token();
 
                     // Submit the recv_from operation
-                    poller.submit_recv_from_entry(
+                    let token = poller.submit_recv_from_entry(
                         this.fd.as_raw_fd(),
                         this.buf,
-                        token,
                         cx.waker().clone(),
                     );
 
@@ -330,14 +324,12 @@ where
             match this.state {
                 FutureState::Unsubmitted => {
                     let mut poller = local_proactor.get_poller();
-                    let token = poller.unique_token();
 
                     // Submit the send_to operation
-                    poller.submit_send_to_entry(
+                    let token = poller.submit_send_to_entry(
                         this.fd.as_raw_fd(),
                         this.buf,
                         this.addr,
-                        token,
                         cx.waker().clone(),
                     );
 
