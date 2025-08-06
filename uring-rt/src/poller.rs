@@ -84,7 +84,7 @@ impl Poller {
                 }
                 continue;
             }
-            
+
             if let Some(waker) = self.wakers.remove(&user_data) {
                 ready_wakers.push(waker);
                 self.results.insert(user_data, result as _);
@@ -93,7 +93,7 @@ impl Poller {
 
         Ok(ready_wakers)
     }
-    pub fn sumbit_read_entry<F>(&mut self, fd: F, buf: &mut [u8], user_data: u64, waker: Waker)
+    pub fn submit_read_entry<F>(&mut self, fd: F, buf: &mut [u8], user_data: u64, waker: Waker)
     where
         F: IntoRawFd,
     {
@@ -112,7 +112,7 @@ impl Poller {
         }
     }
 
-    pub fn sumbit_write_entry<F>(&mut self, fd: F, buf: &[u8], user_data: u64, waker: Waker)
+    pub fn submit_write_entry<F>(&mut self, fd: F, buf: &[u8], user_data: u64, waker: Waker)
     where
         F: IntoRawFd,
     {
@@ -142,7 +142,7 @@ impl Poller {
             iov_base: buf.as_ptr() as *mut _,
             iov_len: buf.len(),
         }];
-        let mut msg = libc::msghdr {
+        let msg = libc::msghdr {
             msg_name: &addr_storage as *const _ as *mut _,
             msg_namelen: addr_len,
             msg_iov: iov.as_ptr() as *mut _,
@@ -152,7 +152,7 @@ impl Poller {
             msg_flags: 0,
         };
 
-        let send_e = opcode::SendMsg::new(types::Fd(fd.into_raw_fd()), &mut msg)
+        let send_e = opcode::SendMsg::new(types::Fd(fd.into_raw_fd()), &msg)
             .build()
             .user_data(user_data);
 
@@ -231,7 +231,7 @@ impl Poller {
     pub fn get_addr_result(&mut self, user_data: u64) -> Option<(usize, SocketAddr)> {
         let result = self.results.remove(&user_data)?;
         let (storage, len) = self.addrs.remove(&user_data)?;
-        let addr = socket_addr_from_storage(&*storage, *len as _).unwrap();
+        let addr = socket_addr_from_storage(&storage, *len as _).unwrap();
         Some((result, addr))
     }
 

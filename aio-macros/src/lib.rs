@@ -14,7 +14,7 @@ pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     if sig.asyncness.is_none() {
         let msg = "the `main` function must be async";
-        return syn::Error::new_spanned(&sig.fn_token, msg)
+        return syn::Error::new_spanned(sig.fn_token, msg)
             .to_compile_error()
             .into();
     }
@@ -44,7 +44,7 @@ pub fn test(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     if sig.asyncness.is_none() {
         let msg = "the `#[aio::test]` attribute can only be used on async functions";
-        return syn::Error::new_spanned(&sig.fn_token, msg)
+        return syn::Error::new_spanned(sig.fn_token, msg)
             .to_compile_error()
             .into();
     }

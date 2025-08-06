@@ -111,7 +111,7 @@ impl Proactor {
         ReadFuture {
             fd,
             buf,
-            state: ReadState::Unsubmitted,
+            state: FutureState::Unsubmitted,
         }
     }
 
@@ -123,7 +123,7 @@ impl Proactor {
         WriteFuture {
             fd,
             buf,
-            state: WriteState::Unsubmitted,
+            state: FutureState::Unsubmitted,
         }
     }
     pub fn accept<'a>(listener: &'a TcpListener) -> AcceptFuture<'a> {
@@ -137,7 +137,7 @@ impl Proactor {
         RecvFromFuture {
             fd,
             buf,
-            state: RecvFromState::Unsubmitted,
+            state: FutureState::Unsubmitted,
         }
     }
 
@@ -149,7 +149,7 @@ impl Proactor {
             fd,
             buf,
             addr,
-            state: SendToState::Unsubmitted,
+            state: FutureState::Unsubmitted,
         }
     }
 
@@ -161,17 +161,16 @@ impl Proactor {
     }
 }
 
-// State for our read future
-pub enum ReadState {
+pub(crate) enum FutureState {
     Unsubmitted,
-    Pending(u64), // Stores the user_data token
+    Pending(u64),
     Done,
 }
 
 pub struct ReadFuture<'a, F> {
     fd: F,
     buf: &'a mut [u8],
-    state: ReadState,
+    state: FutureState,
 }
 
 impl<'a, F> Future for ReadFuture<'a, F>
@@ -184,12 +183,12 @@ where
         let this = self.get_mut();
         Proactor::with(|local_proactor| {
             match this.state {
-                ReadState::Unsubmitted => {
+                FutureState::Unsubmitted => {
                     let mut poller = local_proactor.get_poller();
                     let token = poller.unique_token();
 
                     // Submit the read operation
-                    poller.sumbit_read_entry(
+                    poller.submit_read_entry(
                         this.fd.as_raw_fd(),
                         this.buf,
                         token,
@@ -197,18 +196,18 @@ where
                     );
 
                     // Update state to pending
-                    this.state = ReadState::Pending(token);
+                    this.state = FutureState::Pending(token);
                     Poll::Pending
                 }
-                ReadState::Pending(token) => {
-                    this.state = ReadState::Done;
+                FutureState::Pending(token) => {
+                    this.state = FutureState::Done;
 
                     let mut poller = local_proactor.get_poller();
                     let res = poller.get_result(token).unwrap();
 
                     Poll::Ready(Ok(res))
                 }
-                ReadState::Done => {
+                FutureState::Done => {
                     // This should not happen if polled after completion, but we handle it.
                     panic!("Polled a completed future");
                 }
@@ -217,17 +216,10 @@ where
     }
 }
 
-// State for our write future
-pub enum WriteState {
-    Unsubmitted,
-    Pending(u64), // Stores the user_data token
-    Done,
-}
-
 pub struct WriteFuture<'a, F> {
     fd: F,
     buf: &'a [u8],
-    state: WriteState,
+    state: FutureState,
 }
 
 impl<'a, F> Future for WriteFuture<'a, F>
@@ -240,29 +232,29 @@ where
         let this = self.get_mut();
         Proactor::with(|local_proactor| {
             match this.state {
-                WriteState::Unsubmitted => {
+                FutureState::Unsubmitted => {
                     let mut poller = local_proactor.get_poller();
                     let token = poller.unique_token();
 
                     // Submit the write operation (assuming a similar method exists in Poller)
-                    poller.sumbit_write_entry(
+                    poller.submit_write_entry(
                         this.fd.as_raw_fd(),
                         this.buf,
                         token,
                         cx.waker().clone(),
                     );
 
-                    this.state = WriteState::Pending(token);
+                    this.state = FutureState::Pending(token);
                     Poll::Pending
                 }
-                WriteState::Pending(token) => {
-                    this.state = WriteState::Done;
+                FutureState::Pending(token) => {
+                    this.state = FutureState::Done;
                     let mut poller = local_proactor.get_poller();
 
                     let res = poller.get_result(token).unwrap();
                     Poll::Ready(Ok(res))
                 }
-                WriteState::Done => {
+                FutureState::Done => {
                     panic!("Polled a completed future");
                 }
             }
@@ -270,17 +262,10 @@ where
     }
 }
 
-// State for our recv_from future
-pub enum RecvFromState {
-    Unsubmitted,
-    Pending(u64), // Stores the user_data token
-    Done,
-}
-
 pub struct RecvFromFuture<'a, F> {
     fd: F,
     buf: &'a mut [u8],
-    state: RecvFromState,
+    state: FutureState,
 }
 
 impl<'a, F> Future for RecvFromFuture<'a, F>
@@ -293,7 +278,7 @@ where
         let this = self.get_mut();
         Proactor::with(|local_proactor| {
             match this.state {
-                RecvFromState::Unsubmitted => {
+                FutureState::Unsubmitted => {
                     let mut poller = local_proactor.get_poller();
                     let token = poller.unique_token();
 
@@ -306,18 +291,18 @@ where
                     );
 
                     // Update state to pending
-                    this.state = RecvFromState::Pending(token);
+                    this.state = FutureState::Pending(token);
                     Poll::Pending
                 }
-                RecvFromState::Pending(token) => {
-                    this.state = RecvFromState::Done;
+                FutureState::Pending(token) => {
+                    this.state = FutureState::Done;
 
                     let mut poller = local_proactor.get_poller();
                     let (res, addr) = poller.get_addr_result(token).unwrap();
 
                     Poll::Ready(Ok((res, addr)))
                 }
-                RecvFromState::Done => {
+                FutureState::Done => {
                     // This should not happen if polled after completion, but we handle it.
                     panic!("Polled a completed future");
                 }
@@ -326,18 +311,11 @@ where
     }
 }
 
-// State for our send_to future
-pub enum SendToState {
-    Unsubmitted,
-    Pending(u64), // Stores the user_data token
-    Done,
-}
-
 pub struct SendToFuture<'a, F> {
     fd: F,
     buf: &'a [u8],
     addr: SocketAddr,
-    state: SendToState,
+    state: FutureState,
 }
 
 impl<'a, F> Future for SendToFuture<'a, F>
@@ -350,7 +328,7 @@ where
         let this = self.get_mut();
         Proactor::with(|local_proactor| {
             match this.state {
-                SendToState::Unsubmitted => {
+                FutureState::Unsubmitted => {
                     let mut poller = local_proactor.get_poller();
                     let token = poller.unique_token();
 
@@ -363,17 +341,17 @@ where
                         cx.waker().clone(),
                     );
 
-                    this.state = SendToState::Pending(token);
+                    this.state = FutureState::Pending(token);
                     Poll::Pending
                 }
-                SendToState::Pending(token) => {
-                    this.state = SendToState::Done;
+                FutureState::Pending(token) => {
+                    this.state = FutureState::Done;
                     let mut poller = local_proactor.get_poller();
 
                     let res = poller.get_result(token).unwrap();
                     Poll::Ready(Ok(res))
                 }
-                SendToState::Done => {
+                FutureState::Done => {
                     panic!("Polled a completed future");
                 }
             }

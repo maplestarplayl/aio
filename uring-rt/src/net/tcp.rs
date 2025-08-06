@@ -6,7 +6,7 @@ use std::task::{Context, Poll};
 
 use libc::{sockaddr_storage, socklen_t};
 
-use crate::proactor::{Proactor, ReadState};
+use crate::proactor::{Proactor, FutureState};
 
 pub struct AsyncTcpListener {
     listener: TcpListener,
@@ -72,7 +72,7 @@ impl AsyncTcpStream {
 pub struct AcceptFuture<'a> {
     listener: &'a TcpListener,
     // poller: Arc<Mutex<Poller>>,
-    state: ReadState,
+    state: FutureState,
     storage: sockaddr_storage,
 }
 
@@ -81,7 +81,7 @@ impl<'a> AcceptFuture<'a> {
         Self {
             listener,
             // poller,
-            state: ReadState::Unsubmitted,
+            state: FutureState::Unsubmitted,
             storage: unsafe { std::mem::zeroed() },
         }
     }
@@ -93,7 +93,7 @@ impl<'a> Future for AcceptFuture<'a> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         Proactor::with(|local_proactor| match this.state {
-            ReadState::Unsubmitted => {
+            FutureState::Unsubmitted => {
                 let mut poller = local_proactor.get_poller();
                 let user_data = poller.unique_token();
                 let mut addr_len = std::mem::size_of::<sockaddr_storage>() as socklen_t;
@@ -106,20 +106,20 @@ impl<'a> Future for AcceptFuture<'a> {
                     cx.waker().clone(),
                 );
 
-                this.state = ReadState::Pending(user_data);
+                this.state = FutureState::Pending(user_data);
                 Poll::Pending
             }
-            ReadState::Pending(user_data) => {
+            FutureState::Pending(user_data) => {
                 let mut poller = local_proactor.get_poller();
 
                 if let Some(res) = poller.get_result(user_data) {
-                    this.state = ReadState::Done;
+                    this.state = FutureState::Done;
                     Poll::Ready(Ok(res as i32))
                 } else {
                     Poll::Pending
                 }
             }
-            ReadState::Done => {
+            FutureState::Done => {
                 panic!("Polling after future completed")
             }
         })
