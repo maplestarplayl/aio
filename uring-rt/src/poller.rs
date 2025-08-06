@@ -7,6 +7,7 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::task::Waker;
 
+use io_uring::squeue::Entry;
 use io_uring::{IoUring, opcode, types};
 use nix::sys::eventfd::{EfdFlags, EventFd};
 
@@ -83,13 +84,7 @@ impl Poller {
                 }
                 continue;
             }
-            if self.addrs.contains_key(&user_data) {
-                if let Some(waker) = self.wakers.remove(&user_data) {
-                    ready_wakers.push(waker);
-                    self.results.insert(user_data, result as _);
-                }
-                continue;
-            }
+            
             if let Some(waker) = self.wakers.remove(&user_data) {
                 ready_wakers.push(waker);
                 self.results.insert(user_data, result as _);
@@ -113,10 +108,7 @@ impl Poller {
         self.wakers.insert(user_data, waker);
 
         unsafe {
-            self.ring
-                .submission()
-                .push(&read_e)
-                .expect("submission queue is full")
+            self.push_entry(read_e);
         }
     }
 
@@ -131,10 +123,7 @@ impl Poller {
         self.wakers.insert(user_data, waker);
 
         unsafe {
-            self.ring
-                .submission()
-                .push(&write_e)
-                .expect("submission queue is full")
+            self.push_entry(write_e);
         }
     }
 
@@ -170,10 +159,7 @@ impl Poller {
         self.wakers.insert(user_data, waker);
 
         unsafe {
-            self.ring
-                .submission()
-                .push(&send_e)
-                .expect("submission queue is full")
+            self.push_entry(send_e);
         }
     }
 
@@ -205,10 +191,7 @@ impl Poller {
         self.addrs.insert(user_data, (storage, addrlen));
 
         unsafe {
-            self.ring
-                .submission()
-                .push(&recv_e)
-                .expect("submission queue is full")
+            self.push_entry(recv_e);
         }
     }
 
@@ -228,10 +211,7 @@ impl Poller {
         self.wakers.insert(user_data, waker);
 
         unsafe {
-            self.ring
-                .submission()
-                .push(&accept_e)
-                .expect("submission queue is full");
+            self.push_entry(accept_e);
         }
     }
 
@@ -253,6 +233,20 @@ impl Poller {
         let (storage, len) = self.addrs.remove(&user_data)?;
         let addr = socket_addr_from_storage(&*storage, *len as _).unwrap();
         Some((result, addr))
+    }
+
+    unsafe fn push_entry(&mut self, entry: Entry) {
+        unsafe {
+            if self.ring.submission().push(&entry).is_err() {
+                self.ring
+                    .submit()
+                    .expect("Failed to submit when queue is full");
+                self.ring
+                    .submission()
+                    .push(&entry)
+                    .expect("Failed to push event after submitting")
+            }
+        }
     }
 }
 
