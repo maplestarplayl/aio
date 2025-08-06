@@ -50,6 +50,24 @@ impl AsyncTcpStream {
         // let proactor = self.proactor.clone();
         Proactor::read(self.stream.as_raw_fd(), buf).await
     }
+    pub async fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        Proactor::write(self.stream.as_raw_fd(), buf).await
+    }
+
+    pub async fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        let mut written = 0;
+        while written < buf.len() {
+            let n = self.write(&buf[written..]).await?;
+            if n == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "failed to write whole buffer",
+                ));
+            }
+            written += n;
+        }
+        Ok(())
+    }
 }
 pub struct AcceptFuture<'a> {
     listener: &'a TcpListener,

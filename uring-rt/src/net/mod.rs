@@ -3,3 +3,4 @@ mod udp;
 
 pub(crate) use tcp::AcceptFuture;
 pub use tcp::{AsyncTcpListener, AsyncTcpStream};
+pub use udp::UdpSocket;

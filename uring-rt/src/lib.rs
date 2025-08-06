@@ -1,7 +1,8 @@
-mod net;
+pub mod net;
+use std::future::Future;
 use std::io as stdio;
 
-pub use net::{AsyncTcpListener, AsyncTcpStream};
+pub use net::{AsyncTcpListener, AsyncTcpStream, UdpSocket};
 
 mod poller;
 

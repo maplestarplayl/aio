@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 use std::io;
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::task::Waker;
 
@@ -15,6 +16,7 @@ pub struct Poller {
     ring: IoUring,
     wakers: HashMap<u64, Waker>,
     results: HashMap<u64, usize>, // store the result of ops, mostly are length
+    addrs: HashMap<u64, (Box<libc::sockaddr_storage>, Box<libc::socklen_t>)>,
     wakeup_fd: EventFd,
 }
 
@@ -42,6 +44,7 @@ impl Poller {
             ring,
             wakers: HashMap::new(),
             results: HashMap::new(),
+            addrs: HashMap::new(),
             wakeup_fd,
         })
     }
@@ -77,6 +80,13 @@ impl Poller {
                 let mut buf = 0;
                 unsafe {
                     libc::read(self.wakeup_fd.as_raw_fd(), &mut buf as *mut _ as *mut _, 8);
+                }
+                continue;
+            }
+            if self.addrs.contains_key(&user_data) {
+                if let Some(waker) = self.wakers.remove(&user_data) {
+                    ready_wakers.push(waker);
+                    self.results.insert(user_data, result as _);
                 }
                 continue;
             }
@@ -128,6 +138,80 @@ impl Poller {
         }
     }
 
+    pub fn submit_send_to_entry<F>(
+        &mut self,
+        fd: F,
+        buf: &[u8],
+        addr: SocketAddr,
+        user_data: u64,
+        waker: Waker,
+    ) where
+        F: IntoRawFd,
+    {
+        let (addr_storage, addr_len) = socket_addr_to_storage(addr);
+        let iov = [libc::iovec {
+            iov_base: buf.as_ptr() as *mut _,
+            iov_len: buf.len(),
+        }];
+        let mut msg = libc::msghdr {
+            msg_name: &addr_storage as *const _ as *mut _,
+            msg_namelen: addr_len,
+            msg_iov: iov.as_ptr() as *mut _,
+            msg_iovlen: iov.len() as _,
+            msg_control: std::ptr::null_mut(),
+            msg_controllen: 0,
+            msg_flags: 0,
+        };
+
+        let send_e = opcode::SendMsg::new(types::Fd(fd.into_raw_fd()), &mut msg)
+            .build()
+            .user_data(user_data);
+
+        self.wakers.insert(user_data, waker);
+
+        unsafe {
+            self.ring
+                .submission()
+                .push(&send_e)
+                .expect("submission queue is full")
+        }
+    }
+
+    pub fn submit_recv_from_entry<F>(&mut self, fd: F, buf: &mut [u8], user_data: u64, waker: Waker)
+    where
+        F: IntoRawFd,
+    {
+        let mut storage = Box::new(unsafe { std::mem::zeroed() });
+        let addrlen = Box::new(std::mem::size_of::<libc::sockaddr_storage>() as _);
+        let iov = [libc::iovec {
+            iov_base: buf.as_mut_ptr() as *mut _,
+            iov_len: buf.len(),
+        }];
+        let mut msg = libc::msghdr {
+            msg_name: &mut *storage as *mut _ as *mut _,
+            msg_namelen: *addrlen,
+            msg_iov: iov.as_ptr() as *mut _,
+            msg_iovlen: iov.len() as _,
+            msg_control: std::ptr::null_mut(),
+            msg_controllen: 0,
+            msg_flags: 0,
+        };
+
+        let recv_e = opcode::RecvMsg::new(types::Fd(fd.into_raw_fd()), &mut msg)
+            .build()
+            .user_data(user_data);
+
+        self.wakers.insert(user_data, waker);
+        self.addrs.insert(user_data, (storage, addrlen));
+
+        unsafe {
+            self.ring
+                .submission()
+                .push(&recv_e)
+                .expect("submission queue is full")
+        }
+    }
+
     pub fn submit_accept_entry(
         &mut self,
         fd: RawFd,
@@ -163,4 +247,72 @@ impl Poller {
     pub fn get_result(&mut self, user_data: u64) -> Option<usize> {
         self.results.remove(&user_data)
     }
+
+    pub fn get_addr_result(&mut self, user_data: u64) -> Option<(usize, SocketAddr)> {
+        let result = self.results.remove(&user_data)?;
+        let (storage, len) = self.addrs.remove(&user_data)?;
+        let addr = socket_addr_from_storage(&*storage, *len as _).unwrap();
+        Some((result, addr))
+    }
+}
+
+fn socket_addr_from_storage(
+    storage: &libc::sockaddr_storage,
+    _len: libc::socklen_t,
+) -> io::Result<SocketAddr> {
+    match storage.ss_family as libc::c_int {
+        libc::AF_INET => {
+            let addr: &libc::sockaddr_in = unsafe { std::mem::transmute(storage) };
+            let ip = Ipv4Addr::from(u32::from_be(addr.sin_addr.s_addr));
+            let port = u16::from_be(addr.sin_port);
+            Ok(SocketAddr::new(ip.into(), port))
+        }
+        libc::AF_INET6 => {
+            let addr: &libc::sockaddr_in6 = unsafe { std::mem::transmute(storage) };
+            let ip = Ipv6Addr::from(addr.sin6_addr.s6_addr);
+            let port = u16::from_be(addr.sin6_port);
+            Ok(SocketAddr::new(ip.into(), port))
+        }
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid address family",
+        )),
+    }
+}
+
+fn socket_addr_to_storage(addr: SocketAddr) -> (libc::sockaddr_storage, libc::socklen_t) {
+    let mut storage: libc::sockaddr_storage = unsafe { std::mem::zeroed() };
+    let len = match addr {
+        SocketAddr::V4(addr) => {
+            let mut sockaddr: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+            sockaddr.sin_family = libc::AF_INET as _;
+            sockaddr.sin_port = addr.port().to_be();
+            sockaddr.sin_addr.s_addr = u32::from(*addr.ip()).to_be();
+            unsafe {
+                // std::ptr::copy_nonoverlapping(
+                //     &sockaddr_in as *const _ as *const _,
+                //     &mut storage as *mut _ as *mut _,
+                //     std::mem::size_of::<libc::sockaddr_in>(),
+                // );
+                std::ptr::write(&mut storage as *mut _ as *mut _, sockaddr);
+            }
+            std::mem::size_of::<libc::sockaddr_in>() as _
+        }
+        SocketAddr::V6(addr) => {
+            let mut sockaddr: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
+            sockaddr.sin6_family = libc::AF_INET6 as _;
+            sockaddr.sin6_port = addr.port().to_be();
+            sockaddr.sin6_addr.s6_addr = addr.ip().octets();
+            unsafe {
+                // std::ptr::copy_nonoverlapping(
+                //     &sockaddr_in6 as *const _ as *const _,
+                //     &mut storage as *mut _ as *mut _,
+                //     std::mem::size_of::<libc::sockaddr_in6>(),
+                // );
+                std::ptr::write(&mut storage as *mut _ as *mut _, sockaddr);
+            }
+            std::mem::size_of::<libc::sockaddr_in6>() as _
+        }
+    };
+    (storage, len)
 }
