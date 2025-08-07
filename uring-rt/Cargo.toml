@@ -10,10 +10,13 @@ edition = "2024"
 [dependencies]
 aio-macros = {path = "../aio-macros"}
 futures = "0.3.31"
-io-uring = "0.7.9"
 libc = "0.2.174"
 nix = { version = "0.30.1", features = ["event"] }
+io-uring = "0.7.9"
 slab = "0.4.10"
+socket2 = "0.5.7"
 
-# num_cpus = "1.17.0"
+[dev-dependencies]
+env_logger = "0.11.3"
+log = "0.4.21"
 

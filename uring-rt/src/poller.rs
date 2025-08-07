@@ -52,7 +52,7 @@ impl Poller {
     }
 
     pub fn wakeup(&self) -> io::Result<()> {
-        let val = 1;
+        let val: u64 = 1; // u64 is necessary to ensure read 8 bytes
         let ret = unsafe {
             libc::write(
                 self.wakeup_fd.as_raw_fd(),
@@ -79,7 +79,7 @@ impl Poller {
             let result = cqe.result();
 
             if user_data == WAKE_TOKEN {
-                let mut buf = 0;
+                let mut buf: u64 = 0;
                 unsafe {
                     libc::read(self.wakeup_fd.as_raw_fd(), &mut buf as *mut _ as *mut _, 8);
                 }
@@ -132,7 +132,7 @@ impl Poller {
         unsafe {
             self.push_entry(write_e);
         }
-        
+
         user_data
     }
 
@@ -142,7 +142,7 @@ impl Poller {
         buf: &[u8],
         addr: SocketAddr,
         waker: Waker,
-    ) -> u64 
+    ) -> u64
     where
         F: IntoRawFd,
     {
@@ -227,6 +227,22 @@ impl Poller {
 
         unsafe {
             self.push_entry(accept_e);
+        }
+
+        user_data
+    }
+
+    pub fn submit_connect_entry(&mut self, fd: RawFd, addr: &SocketAddr, waker: Waker) -> u64 {
+        let user_data = self.wakers.insert(waker) as _;
+        let (addr_storage, addr_len) = socket_addr_to_storage(*addr);
+
+        let connect_e =
+            opcode::Connect::new(types::Fd(fd), &addr_storage as *const _ as *mut _, addr_len)
+                .build()
+                .user_data(user_data);
+
+        unsafe {
+            self.push_entry(connect_e);
         }
 
         user_data

@@ -1,12 +1,13 @@
 use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
-use std::os::fd::{AsRawFd, FromRawFd};
+use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::future::Future;
 
 use libc::{sockaddr_storage, socklen_t};
 
-use crate::proactor::{Proactor, FutureState};
+use crate::proactor::{FutureState, Proactor};
 
 pub struct AsyncTcpListener {
     listener: TcpListener,
@@ -46,6 +47,33 @@ pub struct AsyncTcpStream {
 }
 
 impl AsyncTcpStream {
+    pub async fn connect(addr: impl ToSocketAddrs) -> io::Result<Self> {
+        let addr = addr
+            .to_socket_addrs()?
+            .next()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid address"))?;
+
+        let domain = if addr.is_ipv4() {
+            socket2::Domain::IPV4
+        } else {
+            socket2::Domain::IPV6
+        };
+
+        let socket = socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))?;
+        socket.set_nonblocking(true)?;
+
+        let connect_fut = ConnectFuture::new(socket.as_raw_fd(), addr);
+        connect_fut.await?;
+
+        Ok(Self {
+            stream: socket.into(),
+        })
+    }
+
+    pub fn peer_addr(&self) -> io::Result<SocketAddr> {
+        self.stream.peer_addr()
+    }
+
     pub async fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         // let proactor = self.proactor.clone();
         Proactor::read(self.stream.as_raw_fd(), buf).await
@@ -69,6 +97,57 @@ impl AsyncTcpStream {
         Ok(())
     }
 }
+
+pub struct ConnectFuture {
+    fd: RawFd,
+    addr: SocketAddr,
+    state: FutureState,
+}
+
+impl ConnectFuture {
+    pub fn new(fd: RawFd, addr: SocketAddr) -> Self {
+        Self {
+            fd,
+            addr,
+            state: FutureState::Unsubmitted,
+        }
+    }
+}
+
+impl Future for ConnectFuture {
+    type Output = io::Result<()>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.get_mut();
+        Proactor::with(|local_proactor| match this.state {
+            FutureState::Unsubmitted => {
+                let mut poller = local_proactor.get_poller();
+                let user_data =
+                    poller.submit_connect_entry(this.fd, &this.addr, cx.waker().clone());
+
+                this.state = FutureState::Pending(user_data);
+                Poll::Pending
+            }
+            FutureState::Pending(user_data) => {
+                let mut poller = local_proactor.get_poller();
+
+                if let Some(_res) = poller.get_result(user_data) {
+                    this.state = FutureState::Done;
+                    // if res < 0 {
+                    //     return Poll::Ready(Err(io::Error::from_raw_os_error(res as _)));
+                    // }
+                    Poll::Ready(Ok(()))
+                } else {
+                    Poll::Pending
+                }
+            }
+            FutureState::Done => {
+                panic!("Polling after future completed")
+            }
+        })
+    }
+}
+
 pub struct AcceptFuture<'a> {
     listener: &'a TcpListener,
     // poller: Arc<Mutex<Poller>>,

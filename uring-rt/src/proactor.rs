@@ -161,7 +161,7 @@ impl Proactor {
     }
 }
 
-pub(crate) enum FutureState {
+pub enum FutureState {
     Unsubmitted,
     Pending(u64),
     Done,
@@ -187,11 +187,8 @@ where
                     let mut poller = local_proactor.get_poller();
 
                     // Submit the read operation
-                    let token = poller.submit_read_entry(
-                        this.fd.as_raw_fd(),
-                        this.buf,
-                        cx.waker().clone(),
-                    );
+                    let token =
+                        poller.submit_read_entry(this.fd.as_raw_fd(), this.buf, cx.waker().clone());
 
                     // Update state to pending
                     this.state = FutureState::Pending(token);
