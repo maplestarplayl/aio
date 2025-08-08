@@ -123,7 +123,6 @@ impl Proactor {
     pub fn run(&self) -> io::Result<()> {
         while !self.tasks.borrow().is_empty() {
             let mut tasks_to_run = self.ready_queue.borrow_mut().split_off(0);
-            
 
             while let Some(task_id) = tasks_to_run.pop_front() {
                 let mut task = if let Some(task) = self.tasks.borrow_mut().remove(&task_id) {
@@ -140,18 +139,16 @@ impl Proactor {
                     self.tasks.borrow_mut().insert(task_id, task);
                 }
             }
-            
+
             if !self.tasks.borrow().is_empty() && self.ready_queue.borrow().is_empty() {
-                
                 let wakers_to_wake = self.get_poller().poll()?;
-                
+
                 for waker in wakers_to_wake {
                     waker.wake();
                 }
             }
-            
         }
-        
+
         Ok(())
     }
 

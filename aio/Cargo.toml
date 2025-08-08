@@ -6,3 +6,18 @@ edition = "2024"
 [dependencies]
 aio-macros = { path = "../aio-macros" }
 uring-rt = { path = "../uring-rt" }
+futures = "0.3"
+
+[dev-dependencies]
+criterion = "0.7"
+tokio = {version = "1", features = ["net","rt-multi-thread","io-util","macros"]}
+env_logger = "0.11.8"
+
+[[bench]]
+name = "single-rt-bench"
+harness = false
+
+
+# [[bench]]
+# name = "multi-rt-bench"
+# harness = false
