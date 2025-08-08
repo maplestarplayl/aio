@@ -5,9 +5,10 @@ use std::io as stdio;
 pub use net::{AsyncTcpListener, AsyncTcpStream, UdpSocket};
 
 mod poller;
-
+mod traits;
 mod proactor;
 pub use aio_macros::{main, test};
+pub use traits::{AsyncReadRent, AsyncReadRentExt, BufResult, IoBufMut};
 pub use proactor::Proactor;
 
 use crate::proactor::JoinHandle;
@@ -32,6 +33,7 @@ mod tests {
 
     use crate::net::AsyncTcpListener;
     use crate::proactor::Proactor;
+    use crate::traits::AsyncReadRent;
 
     #[test]
     fn proactor_reads_file_correctly() -> io::Result<()> {
@@ -51,7 +53,7 @@ mod tests {
                     .unwrap();
 
                 // 3. Assert
-                assert_eq!(bytes_read, content_to_write.len());
+                assert_eq!(bytes_read as usize, content_to_write.len());
                 assert_eq!(read_buffer.as_slice(), content_to_write);
 
                 // 4. Teardown & Signal completion
@@ -80,7 +82,7 @@ mod tests {
                 let bytes_written = Proactor::write(file, content_to_write).await.unwrap();
 
                 // 3. Assert
-                assert_eq!(bytes_written, content_to_write.len());
+                assert_eq!(bytes_written as usize, content_to_write.len());
                 let file_content = fs::read(file_path).unwrap();
                 assert_eq!(file_content.as_slice(), content_to_write);
 
@@ -115,13 +117,13 @@ mod tests {
 
             // 3. Server Logic: Spawn a task to accept and read from the client.
             proactor.spawn(async move {
-                let mut stream = listener
+                let stream = listener
                     .accept()
                     .await
                     .expect("Failed to accept connection");
-                let mut buf = vec![0; 11];
-                let bytes_read = stream
-                    .read(&mut buf)
+                let buf = vec![0; 11];
+                let (bytes_read, buf) = stream
+                    .read(buf)
                     .await
                     .expect("Failed to read from stream");
 

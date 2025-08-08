@@ -248,7 +248,7 @@ where
                     let mut poller = local_proactor.get_poller();
                     if let Some(res) = poller.get_result(token) {
                         this.state = FutureState::Done;
-                        Poll::Ready(Ok(res))
+                        Poll::Ready(Ok(res as usize))
                     } else {
                         Poll::Pending
                     }
@@ -297,7 +297,7 @@ where
                     let mut poller = local_proactor.get_poller();
                     if let Some(res) = poller.get_result(token) {
                         this.state = FutureState::Done;
-                        Poll::Ready(Ok(res))
+                        Poll::Ready(Ok(res as usize))
                     } else {
                         Poll::Pending
                     }
@@ -349,7 +349,7 @@ where
                     let mut poller = local_proactor.get_poller();
                     if let Some((res, addr)) = poller.get_addr_result(token) {
                         this.state = FutureState::Done;
-                        Poll::Ready(Ok((res, addr)))
+                        Poll::Ready(Ok((res as usize, addr)))
                     } else {
                         Poll::Pending
                     }
@@ -401,7 +401,7 @@ where
                     let mut poller = local_proactor.get_poller();
                     if let Some(res) = poller.get_result(token) {
                         this.state = FutureState::Done;
-                        Poll::Ready(Ok(res))
+                        Poll::Ready(Ok(res as usize))
                     } else {
                         Poll::Pending
                     }

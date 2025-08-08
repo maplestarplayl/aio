@@ -1,6 +1,7 @@
 use std::net::SocketAddr;
 
 use aio::AsyncTcpStream;
+use aio::{AsyncReadRent, AsyncReadRentExt};
 use criterion::{Criterion, criterion_group, criterion_main};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener as TokioTcpListener;
@@ -111,31 +112,31 @@ async fn aio_main() {
 }
 
 async fn echo_server_aio(listener: AsyncTcpListener) {
-    let mut handles = Vec::new();
+    // let mut handles = Vec::new();
     for _ in 0..NUM_CLIENTS {
         let mut socket = listener.accept().await.unwrap();
 
         // 每个连接交给单独任务处理
-        let handle = aio::spawn(async move {
-            let mut buf = [0u8; 1024];
+        aio::spawn(async move {
+            let mut buf = vec![0u8; 1024];
             loop {
-                let n = match socket.read(&mut buf).await {
-                    Ok(0) => break, // 对方关闭连接
-                    Ok(n) => n,
+                let (n, new_buf) = match socket.read(buf).await {
+                    Ok((0, _)) => break, // 对方关闭连接
+                    Ok((n, buf)) => (n, buf),
                     Err(_) => break,
                 };
+                buf = new_buf;
                 // 原样回写
                 if socket.write_all(&buf[..n]).await.is_err() {
                     break;
                 }
             }
         });
-        handles.push(handle);
     }
 
-    for handle in handles {
-        handle.await;
-    }
+    // for handle in handles {
+    //     handle.await;
+    // }
 }
 
 async fn run_client_aio(server_addr: SocketAddr) {
@@ -145,14 +146,7 @@ async fn run_client_aio(server_addr: SocketAddr) {
     for _ in 0..NUM_MESSAGES_PER_CLIENT {
         stream.write_all(msg.as_bytes()).await.unwrap();
 
-        let mut buf = vec![0u8; msg.len()];
-        let mut bytes_read = 0;
-        while bytes_read < buf.len() {
-            let n = stream.read(&mut buf[bytes_read..]).await.unwrap();
-            if n == 0 {
-                panic!("failed to read exact number of bytes");
-            }
-            bytes_read += n;
-        }
+        let buf = vec![0u8; msg.len()];
+        stream.read_exact(buf).await.unwrap();
     }
 }

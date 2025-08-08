@@ -17,7 +17,7 @@ const WAKE_TOKEN: u64 = u64::MAX;
 pub struct Poller {
     ring: IoUring,
     wakers: Slab<Waker>,
-    results: HashMap<u64, usize>, // store the result of ops, mostly are length
+    results: HashMap<u64, i32>, // store the result of ops, mostly are length
     addrs: HashMap<u64, (Box<libc::sockaddr_storage>, Box<libc::socklen_t>)>,
     wakeup_fd: EventFd,
 }
@@ -257,11 +257,11 @@ impl Poller {
             .unwrap()
     }
 
-    pub fn get_result(&mut self, user_data: u64) -> Option<usize> {
+    pub fn get_result(&mut self, user_data: u64) -> Option<i32> {
         self.results.remove(&user_data)
     }
 
-    pub fn get_addr_result(&mut self, user_data: u64) -> Option<(usize, SocketAddr)> {
+    pub fn get_addr_result(&mut self, user_data: u64) -> Option<(i32, SocketAddr)> {
         let result = self.results.remove(&user_data)?;
         let (storage, len) = self.addrs.remove(&user_data)?;
         let addr = socket_addr_from_storage(&storage, *len as _).unwrap();

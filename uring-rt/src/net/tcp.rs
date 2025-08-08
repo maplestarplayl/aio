@@ -8,6 +8,7 @@ use std::task::{Context, Poll};
 use libc::{sockaddr_storage, socklen_t};
 
 use crate::proactor::{FutureState, Proactor};
+use crate::{BufResult, IoBufMut};
 
 pub struct AsyncTcpListener {
     listener: TcpListener,
@@ -42,7 +43,7 @@ impl AsyncTcpListener {
 }
 
 pub struct AsyncTcpStream {
-    stream: TcpStream,
+    pub(crate) stream: TcpStream,
     // proactor: Arc<Proactor>,
 }
 
@@ -75,10 +76,10 @@ impl AsyncTcpStream {
         self.stream.peer_addr()
     }
 
-    pub async fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        // let proactor = self.proactor.clone();
-        Proactor::read(self.stream.as_raw_fd(), buf).await
-    }
+    // pub async fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    //     // let proactor = self.proactor.clone();
+    //     Proactor::read(self.stream.as_raw_fd(), buf).await
+    // }
     pub async fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         Proactor::write(self.stream.as_raw_fd(), buf).await
     }
@@ -192,13 +193,77 @@ impl<'a> Future for AcceptFuture<'a> {
 
                 if let Some(res) = poller.get_result(user_data) {
                     this.state = FutureState::Done;
-                    Poll::Ready(Ok(res as i32))
+                    Poll::Ready(Ok(res))
                 } else {
                     Poll::Pending
                 }
             }
             FutureState::Done => {
                 panic!("Polling after future completed")
+            }
+        })
+    }
+}
+
+
+
+pub struct TcpStreamReadFuture<'a, B: IoBufMut> {
+    stream: &'a AsyncTcpStream,
+    buf: Option<B>,
+    state: FutureState,
+}
+
+impl<'a, B: IoBufMut> TcpStreamReadFuture<'a, B> {
+    pub(crate) fn new(stream: &'a AsyncTcpStream, buf: B) -> Self {
+        Self {
+            stream,
+            buf: Some(buf),
+            state: FutureState::Unsubmitted,
+        }
+    }
+}
+
+impl<'a, B: IoBufMut> Future for TcpStreamReadFuture<'a, B> {
+    type Output = BufResult<usize, B>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // SAFETY: We never move the fields out of the pinned struct.
+        let this = unsafe { self.get_unchecked_mut() };
+
+        let mut buf = this.buf.take().expect("Buffer must be set before polling");
+        Proactor::with(|local_proactor| {
+            let mut poller = local_proactor.get_poller();
+            match this.state {
+                FutureState::Unsubmitted => {
+                    // NOTE: Assumes `submit_read_entry` exists on the poller.
+                    let user_data = poller.submit_read_entry(
+                        this.stream.stream.as_raw_fd(),
+                        buf.as_mut_slice(),
+                        // buf.bytes_total(),
+                        cx.waker().clone(),
+                    );
+                    this.state = FutureState::Pending(user_data);
+                    this.buf = Some(buf);
+                    Poll::Pending
+                }
+                FutureState::Pending(user_data) => {
+                    if let Some(res) = poller.get_result(user_data) {
+                        this.state = FutureState::Done;
+                        if res < 0 {
+                            Poll::Ready(Err((io::Error::from_raw_os_error(res as _), buf)))
+                        } else {
+                            let n = res as usize;
+                            unsafe { buf.set_init(n) };
+                            Poll::Ready(Ok((n, buf)))
+                        }
+                    } else {
+                        this.buf = Some(buf);
+                        Poll::Pending
+                    }
+                }
+                FutureState::Done => {
+                    panic!("Polling after future completed")
+                }
             }
         })
     }
