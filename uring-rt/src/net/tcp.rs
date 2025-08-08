@@ -1,9 +1,9 @@
+use std::future::Future;
 use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::future::Future;
 
 use libc::{sockaddr_storage, socklen_t};
 
@@ -59,7 +59,8 @@ impl AsyncTcpStream {
             socket2::Domain::IPV6
         };
 
-        let socket = socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))?;
+        let socket =
+            socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))?;
         socket.set_nonblocking(true)?;
 
         let connect_fut = ConnectFuture::new(socket.as_raw_fd(), addr);

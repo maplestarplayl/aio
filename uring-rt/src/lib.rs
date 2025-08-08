@@ -9,7 +9,9 @@ mod poller;
 mod proactor;
 pub use aio_macros::{main, test};
 pub use proactor::Proactor;
-pub fn spawn<F>(future: F)
+
+use crate::proactor::JoinHandle;
+pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
 where
     F: Future<Output = ()> + 'static,
 {

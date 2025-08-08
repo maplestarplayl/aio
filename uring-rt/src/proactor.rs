@@ -6,8 +6,9 @@ use std::io;
 use std::net::{SocketAddr, TcpListener};
 use std::os::fd::AsRawFd;
 use std::pin::Pin;
+use std::rc::Rc;
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::task::{Context, Poll, Waker};
 
 use futures::task::{ArcWake, waker_ref};
 
@@ -19,8 +20,34 @@ thread_local! {
 }
 
 type Task = Pin<Box<dyn Future<Output = ()> + 'static>>;
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 struct TaskId(u64);
+
+struct TaskState<T> {
+    result: Option<T>,
+    waker: Option<Waker>,
+}
+
+pub struct JoinHandle<T> {
+    #[allow(dead_code)]
+    task_id: TaskId,
+    state: Rc<RefCell<TaskState<T>>>,
+}
+
+impl<T: 'static> Future for JoinHandle<T> {
+    type Output = T;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut state = self.state.borrow_mut();
+        if let Some(result) = state.result.take() {
+            Poll::Ready(result)
+        } else {
+            state.waker = Some(cx.waker().clone());
+            Poll::Pending
+        }
+    }
+}
 
 /// `Proactor` acts as both reactor and executor here
 pub struct Proactor {
@@ -62,19 +89,41 @@ impl Proactor {
         self.poller.borrow_mut()
     }
 
-    pub fn spawn<F>(&self, future: F)
+    pub fn spawn<F>(&self, future: F) -> JoinHandle<F::Output>
     where
-        F: Future<Output = ()> + 'static,
+        F: Future + 'static,
+        F::Output: 'static,
     {
         let task_id = Proactor::new_task_id();
-        let task = Box::pin(future);
+        let state = Rc::new(RefCell::new(TaskState {
+            result: None,
+            waker: None,
+        }));
+
+        let handle = JoinHandle {
+            task_id,
+            state: state.clone(),
+        };
+
+        let task = Box::pin(async move {
+            let output = future.await;
+            let mut state = state.borrow_mut();
+            state.result = Some(output);
+            if let Some(waker) = state.waker.take() {
+                waker.wake();
+            }
+        });
+
         self.tasks.borrow_mut().insert(task_id, task);
         self.ready_queue.borrow_mut().push_back(task_id);
+
+        handle
     }
 
     pub fn run(&self) -> io::Result<()> {
         while !self.tasks.borrow().is_empty() {
             let mut tasks_to_run = self.ready_queue.borrow_mut().split_off(0);
+            
 
             while let Some(task_id) = tasks_to_run.pop_front() {
                 let mut task = if let Some(task) = self.tasks.borrow_mut().remove(&task_id) {
@@ -91,16 +140,18 @@ impl Proactor {
                     self.tasks.borrow_mut().insert(task_id, task);
                 }
             }
-
-            if !self.tasks.borrow().is_empty() {
+            
+            if !self.tasks.borrow().is_empty() && self.ready_queue.borrow().is_empty() {
+                
                 let wakers_to_wake = self.get_poller().poll()?;
-
+                
                 for waker in wakers_to_wake {
                     waker.wake();
                 }
             }
+            
         }
-
+        
         Ok(())
     }
 
@@ -195,12 +246,15 @@ where
                     Poll::Pending
                 }
                 FutureState::Pending(token) => {
-                    this.state = FutureState::Done;
+                    // this.state = FutureState::Done;
 
                     let mut poller = local_proactor.get_poller();
-                    let res = poller.get_result(token).unwrap();
-
-                    Poll::Ready(Ok(res))
+                    if let Some(res) = poller.get_result(token) {
+                        this.state = FutureState::Done;
+                        Poll::Ready(Ok(res))
+                    } else {
+                        Poll::Pending
+                    }
                 }
                 FutureState::Done => {
                     // This should not happen if polled after completion, but we handle it.
@@ -241,11 +295,15 @@ where
                     Poll::Pending
                 }
                 FutureState::Pending(token) => {
-                    this.state = FutureState::Done;
-                    let mut poller = local_proactor.get_poller();
+                    // this.state = FutureState::Done;
 
-                    let res = poller.get_result(token).unwrap();
-                    Poll::Ready(Ok(res))
+                    let mut poller = local_proactor.get_poller();
+                    if let Some(res) = poller.get_result(token) {
+                        this.state = FutureState::Done;
+                        Poll::Ready(Ok(res))
+                    } else {
+                        Poll::Pending
+                    }
                 }
                 FutureState::Done => {
                     panic!("Polled a completed future");
@@ -286,12 +344,19 @@ where
                     Poll::Pending
                 }
                 FutureState::Pending(token) => {
-                    this.state = FutureState::Done;
+                    // this.state = FutureState::Done;
+
+                    // let mut poller = local_proactor.get_poller();
+                    // let (res, addr) = poller.get_addr_result(token).unwrap();
 
                     let mut poller = local_proactor.get_poller();
-                    let (res, addr) = poller.get_addr_result(token).unwrap();
-
-                    Poll::Ready(Ok((res, addr)))
+                    if let Some((res, addr)) = poller.get_addr_result(token) {
+                        this.state = FutureState::Done;
+                        Poll::Ready(Ok((res, addr)))
+                    } else {
+                        Poll::Pending
+                    }
+                    // Poll::Ready(Ok((res, addr)))
                 }
                 FutureState::Done => {
                     // This should not happen if polled after completion, but we handle it.
@@ -334,11 +399,16 @@ where
                     Poll::Pending
                 }
                 FutureState::Pending(token) => {
-                    this.state = FutureState::Done;
-                    let mut poller = local_proactor.get_poller();
+                    // this.state = FutureState::Done;
 
-                    let res = poller.get_result(token).unwrap();
-                    Poll::Ready(Ok(res))
+                    let mut poller = local_proactor.get_poller();
+                    if let Some(res) = poller.get_result(token) {
+                        this.state = FutureState::Done;
+                        Poll::Ready(Ok(res))
+                    } else {
+                        Poll::Pending
+                    }
+                    // Poll::Ready(Ok(res))
                 }
                 FutureState::Done => {
                     panic!("Polled a completed future");

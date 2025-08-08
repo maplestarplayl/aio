@@ -26,7 +26,7 @@ impl Poller {
     pub fn new() -> io::Result<Self> {
         // Typically, 256 or 512 is a reasonable default for entries.
         // TODO: make this configurable.
-        let entries = 256;
+        let entries = 512;
         let mut ring = IoUring::new(entries)?;
         let wakeup_fd =
             EventFd::from_value_and_flags(0, EfdFlags::EFD_CLOEXEC | EfdFlags::EFD_NONBLOCK)
