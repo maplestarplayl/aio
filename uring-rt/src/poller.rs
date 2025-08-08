@@ -99,6 +99,7 @@ impl Poller {
     where
         F: IntoRawFd,
     {
+        
         let user_data = self.wakers.insert(waker) as _;
         let read_e = opcode::Read::new(
             types::Fd(fd.into_raw_fd()),
@@ -107,8 +108,6 @@ impl Poller {
         )
         .build()
         .user_data(user_data);
-
-        // self.wakers.insert(user_data, waker);
 
         unsafe {
             self.push_entry(read_e);
@@ -248,13 +247,12 @@ impl Poller {
         user_data
     }
 
-    pub fn unique_token(&self) -> u64 {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        static CURRENT_TOKEN: AtomicUsize = AtomicUsize::new(0);
-        CURRENT_TOKEN
-            .fetch_add(1, Ordering::Relaxed)
-            .try_into()
-            .unwrap()
+    /// Removes a request's associated resources from the poller.
+    /// This should be called when a future is dropped.
+    pub fn drop_request(&mut self, token: u64) {
+        self.wakers.try_remove(token as usize);
+        self.results.remove(&token);
+        self.addrs.remove(&token);
     }
 
     pub fn get_result(&mut self, user_data: u64) -> Option<i32> {

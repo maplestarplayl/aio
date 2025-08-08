@@ -221,6 +221,16 @@ pub struct ReadFuture<'a, F> {
     state: FutureState,
 }
 
+impl<'a, F> Drop for ReadFuture<'a, F> {
+    fn drop(&mut self) {
+        if let FutureState::Pending(token) = self.state {
+            Proactor::with(|p| {
+                p.get_poller().drop_request(token);
+            });
+        }
+    }
+}
+
 impl<'a, F> Future for ReadFuture<'a, F>
 where
     F: AsRawFd + Unpin,
@@ -266,6 +276,16 @@ pub struct WriteFuture<'a, F> {
     fd: F,
     buf: &'a [u8],
     state: FutureState,
+}
+
+impl<'a, F> Drop for WriteFuture<'a, F> {
+    fn drop(&mut self) {
+        if let FutureState::Pending(token) = self.state {
+            Proactor::with(|p| {
+                p.get_poller().drop_request(token);
+            });
+        }
+    }
 }
 
 impl<'a, F> Future for WriteFuture<'a, F>
@@ -314,6 +334,16 @@ pub struct RecvFromFuture<'a, F> {
     fd: F,
     buf: &'a mut [u8],
     state: FutureState,
+}
+
+impl<'a, F> Drop for RecvFromFuture<'a, F> {
+    fn drop(&mut self) {
+        if let FutureState::Pending(token) = self.state {
+            Proactor::with(|p| {
+                p.get_poller().drop_request(token);
+            });
+        }
+    }
 }
 
 impl<'a, F> Future for RecvFromFuture<'a, F>
@@ -369,6 +399,16 @@ pub struct SendToFuture<'a, F> {
     buf: &'a [u8],
     addr: SocketAddr,
     state: FutureState,
+}
+
+impl<'a, F> Drop for SendToFuture<'a, F> {
+    fn drop(&mut self) {
+        if let FutureState::Pending(token) = self.state {
+            Proactor::with(|p| {
+                p.get_poller().drop_request(token);
+            });
+        }
+    }
 }
 
 impl<'a, F> Future for SendToFuture<'a, F>

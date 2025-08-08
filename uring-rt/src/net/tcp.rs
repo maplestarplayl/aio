@@ -106,6 +106,16 @@ pub struct ConnectFuture {
     state: FutureState,
 }
 
+impl Drop for ConnectFuture {
+    fn drop(&mut self) {
+        if let FutureState::Pending(token) = self.state {
+            crate::proactor::Proactor::with(|p| {
+                p.get_poller().drop_request(token);
+            });
+        }
+    }
+}
+
 impl ConnectFuture {
     pub fn new(fd: RawFd, addr: SocketAddr) -> Self {
         Self {
@@ -157,6 +167,16 @@ pub struct AcceptFuture<'a> {
     storage: sockaddr_storage,
 }
 
+impl<'a> Drop for AcceptFuture<'a> {
+    fn drop(&mut self) {
+        if let FutureState::Pending(token) = self.state {
+            crate::proactor::Proactor::with(|p| {
+                p.get_poller().drop_request(token);
+            });
+        }
+    }
+}
+
 impl<'a> AcceptFuture<'a> {
     pub fn new(listener: &'a TcpListener) -> Self {
         Self {
@@ -193,6 +213,9 @@ impl<'a> Future for AcceptFuture<'a> {
 
                 if let Some(res) = poller.get_result(user_data) {
                     this.state = FutureState::Done;
+                    if res < 0 {
+                        return Poll::Ready(Err(io::Error::from_raw_os_error(-res)));
+                    }
                     Poll::Ready(Ok(res))
                 } else {
                     Poll::Pending
@@ -205,12 +228,20 @@ impl<'a> Future for AcceptFuture<'a> {
     }
 }
 
-
-
 pub struct TcpStreamReadFuture<'a, B: IoBufMut> {
     stream: &'a AsyncTcpStream,
     buf: Option<B>,
     state: FutureState,
+}
+
+impl<'a, B: IoBufMut> Drop for TcpStreamReadFuture<'a, B> {
+    fn drop(&mut self) {
+        if let FutureState::Pending(token) = self.state {
+            crate::proactor::Proactor::with(|p| {
+                p.get_poller().drop_request(token);
+            });
+        }
+    }
 }
 
 impl<'a, B: IoBufMut> TcpStreamReadFuture<'a, B> {
