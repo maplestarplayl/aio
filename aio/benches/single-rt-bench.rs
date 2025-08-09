@@ -80,7 +80,7 @@ async fn echo_server(listener: TokioTcpListener) {
 
 async fn run_client(server_addr: SocketAddr) {
     let mut stream = tokio::net::TcpStream::connect(server_addr).await.unwrap();
-    let msg = format!("hello from client");
+    let msg = "hello from client".to_string();
 
     for _ in 0..NUM_MESSAGES_PER_CLIENT {
         stream.write_all(msg.as_bytes()).await.unwrap();
