@@ -52,19 +52,15 @@ pub async fn main() {
 async fn handle_connection(stream: AsyncTcpStream) {
     let mut buf = vec![0; 1024];
     loop {
-        match stream.read(buf).await {
-            Ok((0, _)) => {
-                println!("Client closed the connection.");
-                return;
-            }
-            Ok((bytes_read, new_buf)) => {
-                buf = new_buf;
-                println!("Received: {:?}", String::from_utf8_lossy(&buf[..bytes_read]));
-            }
-            Err(_) => {
-                eprintln!("Error reading from stream.");
-                return;
-            }
+        let (n, new_buf) = match socket.read(buf).await {
+            Ok((0, _)) => break, 
+            Ok((n, buf)) => (n, buf),
+            Err(_) => break,
+        };
+        buf = new_buf;
+                
+        if socket.write_all(buf[..n].to_vec()).await.is_err() {
+            break;
         }
     }
 }
@@ -117,4 +113,11 @@ This project is still in its early, experimental stages. The future roadmap incl
 - [ ] **Add more Useful Tests**: Add tests to enable the safety to use.
 ### Performance Improve
 - [ ] **Performance Tuning**: Continuously benchmark and optimize the runtime, scheduler, and I/O submission logic.
+
+
+## Problems to be solved
+
+- Implement all possible data types for `IoBuf` and `IoBufMut` trait and related reference types, maybe need to refactor
+- Split code of `proactor` into `worker` and `runtime` to provide easy-to-use multiple runtime instances apis
+- Use flamegraph or perf to gain insights about the most expensive part and improve
 

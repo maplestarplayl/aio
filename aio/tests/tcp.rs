@@ -38,7 +38,7 @@ async fn aio_main() {
     aio::spawn(echo_server_aio(listener));
 
     let mut handles = Vec::new();
-    for id in 0..10 {
+    for _ in 0..10 {
         let h = aio::spawn(async move {
             run_client_aio(local_addr).await;
         });
@@ -55,17 +55,16 @@ async fn echo_server_aio(listener: AsyncTcpListener) {
     for _ in 0..10 {
         let mut socket = listener.accept().await.unwrap();
 
-        // 每个连接交给单独任务处理
         aio::spawn(async move {
             let mut buf = vec![0u8; 1024];
             loop {
                 let (n, new_buf) = match socket.read(buf).await {
-                    Ok((0, _)) => break, // 对方关闭连接
+                    Ok((0, _)) => break, 
                     Ok((n, buf)) => (n, buf),
                     Err(_) => break,
                 };
                 buf = new_buf;
-                // 原样回写
+                
                 if socket.write_all(buf[..n].to_vec()).await.is_err() {
                     break;
                 }
