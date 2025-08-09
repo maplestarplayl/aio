@@ -111,7 +111,7 @@ This project is still in its early, experimental stages. The future roadmap incl
 - [ ] **Enhanced Documentation**: Write more in-depth documentation and provide a wider range of examples.
 - [ ] **Publish to Crates.io**: Prepare the library for an initial public release.
 - [ ] **Add more Useful Tests**: Add tests to enable the safety to use.
-### Performance Improve
+### Performance Improvement
 - [ ] **Performance Tuning**: Continuously benchmark and optimize the runtime, scheduler, and I/O submission logic.
 
 
@@ -119,5 +119,6 @@ This project is still in its early, experimental stages. The future roadmap incl
 
 - Implement all possible data types for `IoBuf` and `IoBufMut` trait and related reference types, maybe need to refactor
 - Split code of `proactor` into `worker` and `runtime` to provide easy-to-use multiple runtime instances apis
+- Provide cancel/halt safety
 - Use flamegraph or perf to gain insights about the most expensive part and improve
 
