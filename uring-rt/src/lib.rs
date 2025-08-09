@@ -56,7 +56,7 @@ mod tests {
                     .unwrap();
 
                 // 3. Assert
-                assert_eq!(bytes_read as usize, content_to_write.len());
+                assert_eq!(bytes_read, content_to_write.len());
                 assert_eq!(read_buffer.as_slice(), content_to_write);
 
                 // 4. Teardown & Signal completion
@@ -85,7 +85,7 @@ mod tests {
                 let bytes_written = Proactor::write(file, content_to_write).await.unwrap();
 
                 // 3. Assert
-                assert_eq!(bytes_written as usize, content_to_write.len());
+                assert_eq!(bytes_written, content_to_write.len());
                 let file_content = fs::read(file_path).unwrap();
                 assert_eq!(file_content.as_slice(), content_to_write);
 
