@@ -68,6 +68,8 @@ pub unsafe trait IoBufMut: 'static {
     /// Returns the total capacity of the buffer.
     fn bytes_total(&self) -> usize;
     /// Sets the initialized length of the buffer.
+    /// # Safety
+    /// The caller must ensure that `len` bytes of the buffer have been initialized.
     unsafe fn set_init(&mut self, len: usize);
 }
 

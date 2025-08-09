@@ -1,0 +1,27 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check_and_clippy:
+    name: Check and Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install liburing
+        run: sudo apt-get update && sudo apt-get install -y liburing-dev
+
+      - name: Run cargo check
+        run: cargo check --workspace --all-targets
+
+      - name: Run cargo clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
