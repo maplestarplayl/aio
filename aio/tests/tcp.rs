@@ -2,8 +2,8 @@
 
 use std::net::SocketAddr;
 
+use aio::{AsyncReadRent, AsyncReadRentExt, AsyncWriteRentExt};
 use uring_rt::net::{AsyncTcpListener, AsyncTcpStream};
-use aio::{AsyncReadRent,AsyncReadRentExt};
 
 #[aio::test]
 async fn test_tcp_echo() {
@@ -14,7 +14,7 @@ async fn test_tcp_echo() {
         let mut stream = listener.accept().await.unwrap();
         let buf = vec![0; 5];
         let (n, buf) = stream.read(buf).await.unwrap();
-        stream.write_all(&buf[..n]).await.unwrap();
+        stream.write_all(buf[..n].to_vec()).await.unwrap();
     };
 
     let client = async {
@@ -40,7 +40,7 @@ async fn aio_main() {
     let mut handles = Vec::new();
     for id in 0..10 {
         let h = aio::spawn(async move {
-            run_client_aio(local_addr, id).await;
+            run_client_aio(local_addr).await;
         });
         handles.push(h);
     }
@@ -66,7 +66,7 @@ async fn echo_server_aio(listener: AsyncTcpListener) {
                 };
                 buf = new_buf;
                 // 原样回写
-                if socket.write_all(&buf[..n]).await.is_err() {
+                if socket.write_all(buf[..n].to_vec()).await.is_err() {
                     break;
                 }
             }
@@ -74,12 +74,12 @@ async fn echo_server_aio(listener: AsyncTcpListener) {
     }
 }
 
-async fn run_client_aio(server_addr: SocketAddr, id: usize) {
+async fn run_client_aio(server_addr: SocketAddr) {
     let mut stream = AsyncTcpStream::connect(server_addr).await.unwrap();
-    let msg = format!("hello from client {}", id);
-    stream.write_all(msg.as_bytes()).await.unwrap();
+    let msg = b"hello from client";
+    stream.write_all(msg).await.unwrap();
 
     let buf = vec![0u8; msg.len()];
     let (_, buf) = stream.read_exact(buf).await.unwrap();
-    assert_eq!(buf, msg.as_bytes());
+    assert_eq!(buf, msg);
 }

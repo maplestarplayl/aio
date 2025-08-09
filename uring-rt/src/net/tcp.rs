@@ -7,8 +7,9 @@ use std::task::{Context, Poll};
 
 use libc::{sockaddr_storage, socklen_t};
 
+use crate::BufResult;
 use crate::proactor::{FutureState, Proactor};
-use crate::{BufResult, IoBufMut};
+use crate::traits::{IoBuf, IoBufMut};
 
 pub struct AsyncTcpListener {
     listener: TcpListener,
@@ -74,29 +75,6 @@ impl AsyncTcpStream {
 
     pub fn peer_addr(&self) -> io::Result<SocketAddr> {
         self.stream.peer_addr()
-    }
-
-    // pub async fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-    //     // let proactor = self.proactor.clone();
-    //     Proactor::read(self.stream.as_raw_fd(), buf).await
-    // }
-    pub async fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        Proactor::write(self.stream.as_raw_fd(), buf).await
-    }
-
-    pub async fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-        let mut written = 0;
-        while written < buf.len() {
-            let n = self.write(&buf[written..]).await?;
-            if n == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::WriteZero,
-                    "failed to write whole buffer",
-                ));
-            }
-            written += n;
-        }
-        Ok(())
     }
 }
 
@@ -285,6 +263,78 @@ impl<'a, B: IoBufMut> Future for TcpStreamReadFuture<'a, B> {
                         } else {
                             let n = res as usize;
                             unsafe { buf.set_init(n) };
+                            Poll::Ready(Ok((n, buf)))
+                        }
+                    } else {
+                        this.buf = Some(buf);
+                        Poll::Pending
+                    }
+                }
+                FutureState::Done => {
+                    panic!("Polling after future completed")
+                }
+            }
+        })
+    }
+}
+
+pub struct TcpStreamWriteFuture<'a, B: IoBuf> {
+    stream: &'a AsyncTcpStream,
+    buf: Option<B>,
+    state: FutureState,
+}
+
+impl<'a, B: IoBuf> Drop for TcpStreamWriteFuture<'a, B> {
+    fn drop(&mut self) {
+        if let FutureState::Pending(token) = self.state {
+            crate::proactor::Proactor::with(|p| {
+                p.get_poller().drop_request(token);
+            });
+        }
+    }
+}
+
+impl<'a, B: IoBuf> TcpStreamWriteFuture<'a, B> {
+    pub(crate) fn new(stream: &'a AsyncTcpStream, buf: B) -> Self {
+        Self {
+            stream,
+            buf: Some(buf),
+            state: FutureState::Unsubmitted,
+        }
+    }
+}
+
+impl<'a, B: IoBuf> Future for TcpStreamWriteFuture<'a, B> {
+    type Output = BufResult<usize, B>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // SAFETY: We never move the fields out of the pinned struct.
+        let this = unsafe { self.get_unchecked_mut() };
+
+        let buf = this.buf.take().expect("Buffer must be set before polling");
+        Proactor::with(|local_proactor| {
+            let mut poller = local_proactor.get_poller();
+            match this.state {
+                FutureState::Unsubmitted => {
+                    // NOTE: Assumes `submit_write_entry` exists on the poller.
+                    let user_data = poller.submit_write_entry(
+                        this.stream.stream.as_raw_fd(),
+                        // SAFETY: The IoBuf trait ensures that the pointer is valid and the
+                        // number of initialized bytes is correct.
+                        unsafe { std::slice::from_raw_parts(buf.stable_ptr(), buf.bytes_init()) },
+                        cx.waker().clone(),
+                    );
+                    this.state = FutureState::Pending(user_data);
+                    this.buf = Some(buf);
+                    Poll::Pending
+                }
+                FutureState::Pending(user_data) => {
+                    if let Some(res) = poller.get_result(user_data) {
+                        this.state = FutureState::Done;
+                        if res < 0 {
+                            Poll::Ready(Err((io::Error::from_raw_os_error(res as _), buf)))
+                        } else {
+                            let n = res as usize;
                             Poll::Ready(Ok((n, buf)))
                         }
                     } else {

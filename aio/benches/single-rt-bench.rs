@@ -1,7 +1,6 @@
 use std::net::SocketAddr;
 
-use aio::AsyncTcpStream;
-use aio::{AsyncReadRent, AsyncReadRentExt};
+use aio::{AsyncReadRent, AsyncReadRentExt, AsyncTcpStream, AsyncWriteRentExt};
 use criterion::{Criterion, criterion_group, criterion_main};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener as TokioTcpListener;
@@ -127,7 +126,7 @@ async fn echo_server_aio(listener: AsyncTcpListener) {
                 };
                 buf = new_buf;
                 // 原样回写
-                if socket.write_all(&buf[..n]).await.is_err() {
+                if socket.write_all(buf[..n].to_vec()).await.is_err() {
                     break;
                 }
             }
@@ -141,10 +140,10 @@ async fn echo_server_aio(listener: AsyncTcpListener) {
 
 async fn run_client_aio(server_addr: SocketAddr) {
     let mut stream = AsyncTcpStream::connect(server_addr).await.unwrap();
-    let msg = format!("hello from client");
+    let msg = b"Hello from client";
 
     for _ in 0..NUM_MESSAGES_PER_CLIENT {
-        stream.write_all(msg.as_bytes()).await.unwrap();
+        stream.write_all(msg).await.unwrap();
 
         let buf = vec![0u8; msg.len()];
         stream.read_exact(buf).await.unwrap();

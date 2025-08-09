@@ -99,7 +99,6 @@ impl Poller {
     where
         F: IntoRawFd,
     {
-        
         let user_data = self.wakers.insert(waker) as _;
         let read_e = opcode::Read::new(
             types::Fd(fd.into_raw_fd()),

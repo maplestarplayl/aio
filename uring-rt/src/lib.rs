@@ -5,11 +5,14 @@ use std::io as stdio;
 pub use net::{AsyncTcpListener, AsyncTcpStream, UdpSocket};
 
 mod poller;
-mod traits;
 mod proactor;
+mod traits;
+
 pub use aio_macros::{main, test};
-pub use traits::{AsyncReadRent, AsyncReadRentExt, BufResult, IoBufMut};
 pub use proactor::Proactor;
+pub use traits::{
+    AsyncReadRent, AsyncReadRentExt, AsyncWriteRent, AsyncWriteRentExt, BufResult, IoBuf, IoBufMut,
+};
 
 use crate::proactor::JoinHandle;
 pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
@@ -117,15 +120,12 @@ mod tests {
 
             // 3. Server Logic: Spawn a task to accept and read from the client.
             proactor.spawn(async move {
-                let stream = listener
+                let mut stream = listener
                     .accept()
                     .await
                     .expect("Failed to accept connection");
                 let buf = vec![0; 11];
-                let (bytes_read, buf) = stream
-                    .read(buf)
-                    .await
-                    .expect("Failed to read from stream");
+                let (bytes_read, buf) = stream.read(buf).await.expect("Failed to read from stream");
 
                 // 4. Assert: Verify the received data.
                 assert_eq!(bytes_read, 11);
